@@ -2,6 +2,8 @@ package com.locationservice.controller;
 
 import java.util.List;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,10 +16,13 @@ import com.locationservice.dtos.DriverLocationDto;
 import com.locationservice.dtos.NearbyDriversRequestDto;
 import com.locationservice.dtos.SaveDriverLocationRequestDto;
 import com.locationservice.service.LocationService;
+import com.locationservice.utils.LogMessage;
 
 @RestController
 @RequestMapping("/api/location")
 public class LocationController {
+
+    private static final Logger LOGGER = LogManager.getLogger(LocationController.class);
 
     private final LocationService locationService;
 
@@ -26,39 +31,57 @@ public class LocationController {
     }
 
     @PostMapping("/drivers")
-    public ResponseEntity<Boolean> saveDriverLocation(
-            @RequestBody SaveDriverLocationRequestDto saveDriverLocationRequestDto) {
-        try {
-            System.out.println("saveDriverLocation || RequestBody: " + saveDriverLocationRequestDto);
-            Boolean saveDriverLocation = locationService.saveDriverLocation(
-                    saveDriverLocationRequestDto.getDriverId(),
-                    saveDriverLocationRequestDto.getLongitude(),
-                    saveDriverLocationRequestDto.getLatitude()
-            );
+    public ResponseEntity<Boolean> saveDriverLocation(@RequestBody SaveDriverLocationRequestDto requestDto) {
+        LogMessage.setLogMessagePrefix("/SAVE_DRIVER_LOCATION");
 
-            if (saveDriverLocation) {
-                return new ResponseEntity<>(true, HttpStatus.CREATED);
+        if (requestDto == null) {
+            LogMessage.warn(LOGGER, "Received null save driver location request");
+            return ResponseEntity.badRequest().build();
+        }
+
+        LogMessage.info(LOGGER, "Processing save driver location request: " + requestDto);
+
+        try {
+            Boolean isSaved = locationService.saveDriverLocation(
+                    requestDto.getDriverId(), 
+                    requestDto.getLongitude(),
+                    requestDto.getLatitude());
+
+            if (isSaved) {
+                LogMessage.info(LOGGER, "Driver location saved successfully: " + requestDto.getDriverId());
+                return ResponseEntity.status(HttpStatus.CREATED).body(true);
             } else {
-                return new ResponseEntity<>(false, HttpStatus.BAD_REQUEST);
+                LogMessage.warn(LOGGER, "Failed to save driver location: " + requestDto.getDriverId());
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(false);
             }
         } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(false);
+            LogMessage.logException(LOGGER, e);
+            throw new RuntimeException("Error saving driver location", e);
         }
     }
 
-
     @GetMapping("/nearby/drivers")
     public ResponseEntity<List<DriverLocationDto>> getNearbyDrivers(
-            @RequestBody NearbyDriversRequestDto nearbyDriversRequestDto) {
+            @RequestBody NearbyDriversRequestDto requestDto) {
+        LogMessage.setLogMessagePrefix("/GET_NEARBY_DRIVERS");
+
+        if (requestDto == null) {
+            LogMessage.warn(LOGGER, "Received null nearby drivers request");
+            return ResponseEntity.badRequest().build();
+        }
+
+        LogMessage.info(LOGGER, "Processing nearby drivers request: " + requestDto);
+
         try {
             List<DriverLocationDto> nearbyDrivers = locationService.getNearbyDrivers(
-            		nearbyDriversRequestDto.getLongitude(), 
-            		nearbyDriversRequestDto.getLatitude());
-            return new ResponseEntity<>(nearbyDrivers, HttpStatus.OK);
+                    requestDto.getLongitude(),
+                    requestDto.getLatitude());
+
+            LogMessage.info(LOGGER, "Found nearby drivers: " + nearbyDrivers.size());
+            return ResponseEntity.ok(nearbyDrivers);
         } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(List.of());
+            LogMessage.logException(LOGGER, e);
+            throw new RuntimeException("Error fetching nearby drivers", e);
         }
     }
 }

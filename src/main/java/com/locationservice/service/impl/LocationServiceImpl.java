@@ -3,6 +3,8 @@ package com.locationservice.service.impl;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.data.geo.Circle;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResults;
@@ -15,59 +17,87 @@ import org.springframework.stereotype.Service;
 
 import com.locationservice.dtos.DriverLocationDto;
 import com.locationservice.service.LocationService;
+import com.locationservice.utils.LogMessage;
 
 @Service
 public class LocationServiceImpl implements LocationService {
 
-	private final StringRedisTemplate stringRedisTemplate;
-	private static final String DRIVER_GEO_OPS_KEY = "drivers";
-	private static final Double SEARCH_RADIUS = 5.0; // in kilometers
+    private static final Logger LOGGER = LogManager.getLogger(LocationServiceImpl.class);
 
-	public LocationServiceImpl(StringRedisTemplate stringRedisTemplate) {
-		this.stringRedisTemplate = stringRedisTemplate;
-	}
+    private final StringRedisTemplate stringRedisTemplate;
+    private static final String DRIVER_GEO_OPS_KEY = "drivers";
+    private static final Double SEARCH_RADIUS = 5.0; // in kilometers
 
-	@Override
-	public Boolean saveDriverLocation(String driverId, Double longitude, Double latitude) {
-		try {
-			GeoOperations<String, String> geoOps = stringRedisTemplate.opsForGeo();
-			Long addedCount = geoOps.add(DRIVER_GEO_OPS_KEY, new Point(longitude, latitude), driverId);
+    public LocationServiceImpl(StringRedisTemplate stringRedisTemplate) {
+        this.stringRedisTemplate = stringRedisTemplate;
+    }
 
-			if (addedCount != null && addedCount > 0) {
-				System.out.println(
-						"Driver location saved in Redis: " + driverId + " (" + longitude + ", " + latitude + ")");
-				return true;
-			} else {
-				System.out.println("Failed to save driver location in Redis: " + driverId);
-				return false;
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
-			return false;
-		}
-	}
+    @Override
+    public Boolean saveDriverLocation(String driverId, Double longitude, Double latitude) {
+        LogMessage.setLogMessagePrefix("/SAVE_DRIVER_LOCATION");
 
-	@Override
-	public List<DriverLocationDto> getNearbyDrivers(Double longitude, Double latitude) {
-		GeoOperations<String, String> geoOps = stringRedisTemplate.opsForGeo();
-		Distance radius = new Distance(SEARCH_RADIUS, Metrics.KILOMETERS);
-		Circle within = new Circle(new Point(longitude, latitude), radius);
+        LogMessage.info(LOGGER, String.format("Attempting to save driver location: "
+        		+ "driverId=%s, longitude=%f, latitude=%f", driverId, longitude, latitude));
 
-		GeoResults<RedisGeoCommands.GeoLocation<String>> geoResults = geoOps.radius(DRIVER_GEO_OPS_KEY, within);
+        try {
+            GeoOperations<String, String> geoOps = stringRedisTemplate.opsForGeo();
+            Long addedCount = geoOps.add(
+                    DRIVER_GEO_OPS_KEY, 
+                    new Point(longitude, latitude), 
+                    driverId);
 
-		if (geoResults == null || geoResults.getContent().isEmpty()) {
-			System.out.println("No nearby drivers found for location: (" + longitude + ", " + latitude + ")");
-			return new ArrayList<>();
-		}
+            if (addedCount != null && addedCount > 0) {
+                LogMessage.info(LOGGER, String.format("Driver location saved successfully in Redis: "
+                		+ "driverId=%s, longitude=%f, latitude=%f", driverId, longitude, latitude));
+                return true;
+            } else {
+                LogMessage.warn(LOGGER, String.format("Failed to save driver location in Redis:"
+                		+ " driverId=%s", driverId));
+                return false;
+            }
+        } catch (Exception e) {
+            LogMessage.logException(LOGGER, e);
+            return false;
+        }
+    }
 
-		return geoResults.getContent().stream().map(result -> {
-			RedisGeoCommands.GeoLocation<String> location = result.getContent();
-			Point point = location.getPoint();
-			return DriverLocationDto.builder()
-					.driverId(location.getName())
-					.latitude(point.getY())
-					.longitude(point.getX())
-					.build();
-		}).toList();
-	}
+    @Override
+    public List<DriverLocationDto> getNearbyDrivers(Double longitude, Double latitude) {
+        LogMessage.setLogMessagePrefix("/GET_NEARBY_DRIVERS");
+        
+        LogMessage.info(LOGGER, String.format("Fetching nearby drivers for location: "
+        		+ "longitude=%f, latitude=%f", longitude, latitude));
+        try {
+            GeoOperations<String, String> geoOps = stringRedisTemplate.opsForGeo();
+            Distance radius = new Distance(SEARCH_RADIUS, Metrics.KILOMETERS);
+            Circle within = new Circle(
+                    new Point(longitude, latitude),
+                    radius);
+
+            GeoResults<RedisGeoCommands.GeoLocation<String>> geoResults = geoOps.radius(DRIVER_GEO_OPS_KEY, within);
+
+            if (geoResults == null || geoResults.getContent().isEmpty()) {
+                LogMessage.warn(LOGGER, String.format("No nearby drivers found for location: "
+                		+ "longitude=%f, latitude=%f", longitude, latitude));
+                return new ArrayList<>();
+            }
+
+            List<DriverLocationDto> driverLocations = geoResults.getContent().stream().map(result -> {
+                RedisGeoCommands.GeoLocation<String> location = result.getContent();
+                Point point = location.getPoint();
+                return DriverLocationDto.builder()
+                        .driverId(location.getName())
+                        .latitude(point.getY())
+                        .longitude(point.getX())
+                        .build();
+            }).toList();
+
+            LogMessage.info(LOGGER, String.format("Found %d nearby drivers for location: "
+            		+ "longitude=%f, latitude=%f", driverLocations.size(), longitude, latitude));
+            return driverLocations;
+        } catch (Exception e) {
+            LogMessage.logException(LOGGER, e);
+            return new ArrayList<>();
+        }
+    }
 }
